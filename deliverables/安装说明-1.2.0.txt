@@ -19,4 +19,4 @@
 
 已通过 114 项逻辑检查、9 项桌面 SQLite 检查、APK 编译、签名及对齐校验。
 尚未完成 Android 设备上的运行与视觉检查。
-源码见 JianJi-source-1.2.0.zip。
+源码可在 https://github.com/majinyi913-hub/jianji-android 浏览或下载 ZIP。

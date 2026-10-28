@@ -2,7 +2,7 @@
 
 中文离线记账应用，原生 Android / Java / SQLite，无第三方运行时依赖，无广告、账号或联网权限。
 
-**[下载简记 1.2.0 APK](https://github.com/majinyi913-hub/jianji-android/releases/download/v1.2.0/JianJi-1.2.0.apk)** · [发布说明与全部附件](https://github.com/majinyi913-hub/jianji-android/releases/tag/v1.2.0)
+**[下载简记 1.2.0 APK](https://github.com/majinyi913-hub/jianji-android/raw/refs/heads/main/downloads/JianJi-1.2.0.apk)** · [版本说明](docs/RELEASE-1.2.0.md) · [SHA-256 校验文件](deliverables/SHA256-1.2.0.txt)
 
 ## 功能
 
@@ -21,7 +21,7 @@
 
 ## 安装
 
-在本仓库的 **Releases** 中下载 `JianJi-1.2.0.apk`，传到 Android 8.0 或更高版本的手机后点击安装。按系统提示允许当前文件管理器或浏览器安装此 APK。自行构建的安装包会输出到 `deliverables/`。
+点击上方 APK 下载链接，或在仓库的 `downloads/` 目录找到 `JianJi-1.2.0.apk`，传到 Android 8.0 或更高版本的手机后点击安装。按系统提示允许当前文件管理器或浏览器安装此 APK。自行构建的安装包会输出到 `deliverables/`。
 
 已安装 1.0.0 / 1.1.0 的手机可以直接覆盖升级：应用标识和签名保持一致，versionCode 升为 3。SQLite 数据库升级为版本 3，追加余额设置表；从版本 1 升级时同时追加细分列。旧记录与预算保留。升级后首次打开，需要填写现在的实际余额，无需卸载旧版。
 
