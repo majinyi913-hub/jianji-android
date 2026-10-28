@@ -53,7 +53,13 @@ public final class LedgerTest {
         equal(-12345L,Ledger.balance(Ledger.balanceBase(-12345,Ledger.totals(old)[2]),Ledger.totals(old)[2]));
         equal(1000L,Ledger.totals(old)[0]);equal(200L,Ledger.totals(old)[1]);
         reject(()->Ledger.balanceBase(Ledger.MAX_BALANCE_BASE+1,0));
-        System.out.println("PASS: "+checks+" finance, balance initialization/updates, subcategory, filtering, CSV and date checks");
+        equal("—",Ledger.savingsRate(0,0));equal("—",Ledger.savingsRate(0,2500));
+        equal("100.0%",Ledger.savingsRate(100000,0));equal("40.0%",Ledger.savingsRate(100000,60000));
+        equal("0.0%",Ledger.savingsRate(100000,100000));equal("-50.0%",Ledger.savingsRate(100000,150000));
+        equal("33.3%",Ledger.savingsRate(3,2));equal("66.7%",Ledger.savingsRate(3,1));
+        equal("0.1%",Ledger.savingsRate(2000,1999));equal("-0.1%",Ledger.savingsRate(2000,2001));
+        equal("-99999900.0%",Ledger.savingsRate(1,1000000));equal("50.0%",Ledger.savingsRate(Long.MAX_VALUE,Long.MAX_VALUE/2));
+        System.out.println("PASS: "+checks+" finance, savings rate, balance initialization/updates, subcategory, filtering, CSV and date checks");
     }
     private static Ledger.Entry entry(String category,String subcategory,long cents){Ledger.Entry e=new Ledger.Entry();e.category=category;e.subcategory=subcategory;e.cents=cents;return e;}
 }

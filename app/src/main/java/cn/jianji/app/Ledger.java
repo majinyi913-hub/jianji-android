@@ -109,6 +109,14 @@ public final class Ledger {
         return new long[]{income, expense, income - expense};
     }
 
+    /** Monthly surplus / income; a month without income has no defined rate. */
+    public static String savingsRate(long income, long expense) {
+        if (income <= 0) return "—";
+        return BigDecimal.valueOf(income).subtract(BigDecimal.valueOf(expense))
+            .multiply(BigDecimal.valueOf(100)).divide(BigDecimal.valueOf(income), 1, RoundingMode.HALF_UP)
+            .toPlainString() + "%";
+    }
+
     public static Map<String, Long> categories(List<Entry> entries, boolean income) {
         Map<String, Long> result = new LinkedHashMap<>();
         for (String c : income ? INCOME : EXPENSE) result.put(c, 0L);

@@ -130,9 +130,16 @@ public class MainActivity extends Activity {
     private void ledgerPage() {
         balanceCard();monthPicker(); long[] totals = Ledger.totals(entries);
         LinearLayout hero = Ui.col(this); hero.setBackground(Ui.bg(Ui.GREEN,24,this)); Ui.pad(hero,22,22,22,22);
-        hero.addView(Ui.text(this,"本月结余 · 元",13,0xFFD7E6D7,false)); Ui.space(hero,10);
-        TextView balance = Ui.text(this,Ledger.money(totals[2]),36,Ui.WHITE,true); balance.setAutoSizeTextTypeUniformWithConfiguration(18,36,1,android.util.TypedValue.COMPLEX_UNIT_SP); balance.setMaxLines(1); hero.addView(balance,new LinearLayout.LayoutParams(-1,Ui.dp(this,48))); Ui.space(hero,22);
+        LinearLayout headline=Ui.row(this),surplus=Ui.col(this),savings=Ui.col(this);
+        surplus.addView(Ui.text(this,"本月结余 · 元",13,0xFFD7E6D7,false));Ui.space(surplus,10);
+        TextView balance = Ui.text(this,Ledger.money(totals[2]),36,Ui.WHITE,true); balance.setAutoSizeTextTypeUniformWithConfiguration(14,36,1,android.util.TypedValue.COMPLEX_UNIT_SP); balance.setMaxLines(1);balance.setGravity(Gravity.CENTER_VERTICAL); surplus.addView(balance,new LinearLayout.LayoutParams(-1,Ui.dp(this,48)));
+        headline.addView(surplus,new LinearLayout.LayoutParams(0,-2,1.6f));
+        savings.addView(Ui.text(this,"当月储蓄率",13,0xFFD7E6D7,false));Ui.space(savings,10);
+        String rate=Ledger.savingsRate(totals[0],totals[1]);TextView percent=Ui.text(this,rate,30,Ui.WHITE,true);percent.setMaxLines(1);percent.setEllipsize(android.text.TextUtils.TruncateAt.END);percent.setAutoSizeTextTypeUniformWithConfiguration(12,30,1,android.util.TypedValue.COMPLEX_UNIT_SP);percent.setGravity(Gravity.CENTER_VERTICAL);percent.setContentDescription("当月储蓄率 "+(totals[0]==0?"暂无收入，暂不计算":rate));savings.addView(percent,new LinearLayout.LayoutParams(-1,Ui.dp(this,48)));
+        savings.setOnClickListener(v->message("当月储蓄率",month+"\n本月收入：¥ "+Ledger.money(totals[0])+"\n本月支出：¥ "+Ledger.money(totals[1])+"\n本月结余：¥ "+Ledger.money(totals[2])+"\n\n"+(totals[0]==0?"本月没有收入，暂不计算储蓄率。":"储蓄率 = 结余 ÷ 收入 × 100%\n当月储蓄率："+rate)));
+        LinearLayout.LayoutParams savingsParams=new LinearLayout.LayoutParams(0,-2,1);savingsParams.leftMargin=Ui.dp(this,16);headline.addView(savings,savingsParams);hero.addView(headline);Ui.space(hero,22);
         LinearLayout row = Ui.row(this); Ui.weight(row,metric("收入",totals[0],true)); Ui.weight(row,metric("支出",totals[1],true)); hero.addView(row); body.addView(hero); Ui.space(body,14);
+        Ui.space(hero,12);hero.addView(Ui.text(this,totals[0]==0?"暂无收入，储蓄率待计算":"储蓄率 = 本月结余 ÷ 本月收入",11,0xFFD7E6D7,false));
         long budget = db.budget(month.toString());
         LinearLayout budgetCard = Ui.card(this); Ui.pad(budgetCard,18,14,18,14);
         LinearLayout br = Ui.row(this); Ui.weight(br,Ui.text(this,"月度预算",14,Ui.INK,true)); TextView b = Ui.text(this,budget==0 ? "设置预算  ›" : "¥ "+Ledger.money(budget)+"  ›",14,Ui.GREEN,true); br.addView(b); budgetCard.addView(br);
@@ -276,7 +283,7 @@ public class MainActivity extends Activity {
         action("导出备份","账目、预算、余额及订阅 · JSON，可恢复",()->createDocument(BACKUP,"application/json","简记备份-"+LocalDate.now()+".json"));
         action("恢复备份","合并导入，重复记录自动跳过",()->restoreDialog());
         action("导出表格","全部记录 · CSV，可用 Excel 打开",()->createDocument(CSV,"text/csv","简记账单-"+LocalDate.now()+".csv"));
-        Ui.space(body,16);LinearLayout note=Ui.card(this);note.setBackground(Ui.bg(Ui.PALE,20,this));note.addView(Ui.text(this,"数据保存在这台手机上",15,Ui.GREEN,true));Ui.space(note,8);note.addView(Ui.text(this,"建议定期导出备份。卸载应用或清除应用数据会删除本机账本；更换手机时，可通过 JSON 备份恢复。",13,Ui.GREEN,false));body.addView(note);Ui.space(body,24);TextView ver=Ui.text(this,"简记 1.3.0  /  认真生活，轻松记录",12,Ui.MUTED,false);ver.setGravity(Gravity.CENTER);body.addView(ver);
+        Ui.space(body,16);LinearLayout note=Ui.card(this);note.setBackground(Ui.bg(Ui.PALE,20,this));note.addView(Ui.text(this,"数据保存在这台手机上",15,Ui.GREEN,true));Ui.space(note,8);note.addView(Ui.text(this,"建议定期导出备份。卸载应用或清除应用数据会删除本机账本；更换手机时，可通过 JSON 备份恢复。",13,Ui.GREEN,false));body.addView(note);Ui.space(body,24);TextView ver=Ui.text(this,"简记 1.3.1  /  认真生活，轻松记录",12,Ui.MUTED,false);ver.setGravity(Gravity.CENTER);body.addView(ver);
     }
     private void action(String title,String subtitle,Runnable fn){LinearLayout c=Ui.card(this);Ui.pad(c,18,16,18,16);LinearLayout r=Ui.row(this);LinearLayout texts=Ui.col(this);texts.addView(Ui.text(this,title,16,Ui.INK,true));Ui.space(texts,7);texts.addView(Ui.text(this,subtitle,12,Ui.MUTED,false));Ui.weight(r,texts);r.addView(Ui.text(this,"›",24,Ui.MUTED,false));c.addView(r);c.setOnClickListener(v->fn.run());body.addView(c);Ui.space(body,10);}
     private void empty(LinearLayout parent,String title,String sub){LinearLayout c=Ui.col(this);Ui.pad(c,14,32,14,30);TextView icon=Ui.text(this,"记",26,Ui.GREEN,true);icon.setGravity(Gravity.CENTER);icon.setBackground(Ui.bg(Ui.PALE,22,this));LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(Ui.dp(this,68),Ui.dp(this,68));ip.gravity=Gravity.CENTER_HORIZONTAL;c.addView(icon,ip);Ui.space(c,18);TextView h=Ui.text(this,title,16,Ui.INK,true);h.setGravity(Gravity.CENTER);c.addView(h);Ui.space(c,10);TextView t=Ui.text(this,sub,12,Ui.MUTED,false);t.setGravity(Gravity.CENTER);t.setLineSpacing(Ui.dp(this,5),1);c.addView(t);parent.addView(c);}
