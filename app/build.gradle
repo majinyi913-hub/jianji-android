@@ -1,0 +1,14 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'cn.jianji.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'cn.jianji.app'
+        minSdk 26
+        targetSdk 35
+        versionCode 3
+        versionName '1.2.0'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
+}
