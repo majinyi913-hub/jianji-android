@@ -13,6 +13,8 @@ import cn.jianji.app.EntryActivity;
 import cn.jianji.app.MainActivity;
 import cn.jianji.app.Ledger;
 import cn.jianji.app.LedgerDb;
+import cn.jianji.app.Subscription;
+import cn.jianji.app.SubscriptionActivity;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.time.YearMonth;
@@ -23,7 +25,7 @@ public final class LedgerInstrumentation extends Instrumentation {
     private void check(boolean value,String message){checks++;if(!value)throw new AssertionError(message);}
     @Override public void onCreate(Bundle args){super.onCreate(args);start();}
     @Override public void onStart(){Bundle result=new Bundle();try{
-        balanceTests();dbTests();setupUiTests();uiTests();result.putString("stream","\nPASS: "+checks+" Android database, balance, backup and UI checks\n");finish(Activity.RESULT_OK,result);
+        subscriptionTests();balanceTests();dbTests();setupUiTests();uiTests();subscriptionUiTests();result.putString("stream","\nPASS: "+checks+" Android database, subscription, balance, backup and UI checks\n");finish(Activity.RESULT_OK,result);
     }catch(Throwable t){result.putString("stream","\nFAIL: "+t+"\n"+android.util.Log.getStackTraceString(t));finish(Activity.RESULT_CANCELED,result);}}
     private void dbTests() throws Exception{
         getTargetContext().deleteDatabase("jianji.db");
@@ -35,7 +37,7 @@ public final class LedgerInstrumentation extends Instrumentation {
             check(db.list(thisMonth).size()==1 && db.list(previous).isEmpty(),"month filtering");
             db.setBudget(thisMonth,10000);String backup=db.backup();db.delete(e.id);check(db.count()==0,"delete");
             int[] restored=db.restore(backup);check(restored[0]==1 && restored[1]==0,"restore");
-            check(new JSONObject(backup).getLong("version")==3 && db.find(e.id).subcategory.equals("早餐"),"subcategory backup round trip");
+            check(new JSONObject(backup).getLong("version")==4 && db.find(e.id).subcategory.equals("早餐"),"subcategory backup round trip");
             e.note="保留本机修改";db.save(e);db.setBudget(thisMonth,25000);restored=db.restore(backup);
             check(restored[0]==0 && restored[1]==1,"duplicate skip");check(db.find(e.id).note.equals("保留本机修改"),"preserve existing entry");check(db.budget(thisMonth)==25000,"preserve budget");
             JSONObject bad=new JSONObject(backup);JSONArray arr=bad.getJSONArray("entries");JSONObject fresh=new JSONObject(arr.getJSONObject(0).toString());fresh.put("id","new-valid-test");arr.put(fresh);JSONObject invalid=new JSONObject(fresh.toString());invalid.put("id","new-invalid-test");invalid.put("cents",0);arr.put(invalid);
@@ -45,9 +47,38 @@ public final class LedgerInstrumentation extends Instrumentation {
             db.restore(oldBackup.toString());check(db.find("legacy-backup").subcategory.isEmpty(),"version-1 backup compatibility");db.delete("legacy-backup");
             oldBackup=new JSONObject(backup);oldBackup.put("version",2);oldBackup.remove("balance");oldBackup.getJSONArray("entries").getJSONObject(0).put("id","v2-backup");
             db.restore(oldBackup.toString());check(db.find("v2-backup").subcategory.equals("早餐")&&!db.hasBalance(),"version-2 backup compatibility without balance");db.delete("v2-backup");
+            oldBackup=new JSONObject(backup);oldBackup.put("version",3);oldBackup.remove("subscriptions");oldBackup.getJSONArray("entries").getJSONObject(0).put("id","home-v3").put("category","居家").put("subcategory","");
+            db.restore(oldBackup.toString());check(db.find("home-v3").category.equals("其他支出"),"legacy home category import");db.delete("home-v3");
             e.date=previous+"-01";db.save(e);check(db.list(thisMonth).isEmpty() && db.list(previous).size()==1,"month move after edit");
         }
         try(LedgerDb reopened=new LedgerDb(getTargetContext())){check(reopened.find(e.id).cents==2001,"persists after reopen");reopened.delete(e.id);}
+    }
+    private void subscriptionTests() throws Exception{
+        getTargetContext().deleteDatabase("jianji.db");String snapshot;String planId;
+        try(LedgerDb db=new LedgerDb(getTargetContext())){
+            db.setCurrentBalance(10000);Subscription s=new Subscription();s.name="视频会员";s.category="娱乐";s.cents=100;s.billingDay=31;s.startMonth="2024-01";s.nextMonth=s.startMonth;planId=s.id;db.saveSubscription(s);
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2024,3,31),1000)==3,"catch up three due months");
+            check(db.currentBalance()==9700&&db.count()==3,"automatic charges reduce balance");
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2024,3,31),1000)==0,"repeated scheduler is idempotent");
+            String feb=Subscription.entryId(s.id,YearMonth.of(2024,2));check(db.find(feb).date.equals("2024-02-29"),"31st uses leap month end");db.delete(feb);
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2024,3,31),1000)==0&&db.find(feb)==null&&db.currentBalance()==9800,"deleted charge is not regenerated");
+            s.cents=200;s.billingDay=15;db.saveSubscription(s);check(db.subscription(s.id).nextMonth.equals("2024-04"),"editing preserves billing cursor");
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2024,4,15),1000)==1&&db.currentBalance()==9600,"new terms apply to next period");
+            snapshot=db.backup();
+        }
+        getTargetContext().deleteDatabase("jianji.db");
+        try(LedgerDb db=new LedgerDb(getTargetContext())){
+            db.restore(snapshot);check(db.currentBalance()==9600&&db.subscriptions(false).size()==1,"backup restores plan and balance");
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2024,4,30),1000)==0&&db.count()==3,"backup preserves progress and deleted gap");
+            db.restore(snapshot);check(db.count()==3&&db.currentBalance()==9600,"duplicate plan import does not double charge");
+            db.deleteSubscription(planId);check(db.subscriptions(false).isEmpty()&&db.count()==3&&db.currentBalance()==9600,"plan deletion keeps history and balance");
+            check(db.applyDueSubscriptions(java.time.LocalDate.of(2026,12,31),1000)==0,"deleted plan never charges later");
+            db.restore(snapshot);check(db.subscriptions(false).isEmpty(),"deleted plan tombstone wins on merge");
+            JSONObject bad=new JSONObject(snapshot);bad.getJSONArray("subscriptions").getJSONObject(0).put("billingDay",32);boolean rejected=false;try{db.restore(bad.toString());}catch(Exception expected){rejected=true;}check(rejected&&db.currentBalance()==9600,"invalid plan backup leaves local state intact");
+            snapshot=db.backup();
+        }
+        getTargetContext().deleteDatabase("jianji.db");
+        try(LedgerDb db=new LedgerDb(getTargetContext())){db.restore(snapshot);check(db.subscriptions(false).isEmpty()&&db.subscriptions(true).size()==1,"deletion tombstone survives device restore");}
     }
     private void balanceTests() throws Exception {
         getTargetContext().deleteDatabase("jianji.db");String snapshot;
@@ -75,7 +106,7 @@ public final class LedgerInstrumentation extends Instrumentation {
     }
     private Activity launch(Class<?> cls,String id){Intent i=new Intent(getTargetContext(),cls);i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);if(id!=null)i.putExtra("id",id);return startActivitySync(i);}
     private View text(View v,String label){if(v instanceof TextView && label.contentEquals(((TextView)v).getText()))return v;if(v instanceof ViewGroup){ViewGroup g=(ViewGroup)v;for(int i=0;i<g.getChildCount();i++){View found=text(g.getChildAt(i),label);if(found!=null)return found;}}return null;}
-    private void click(Activity a,String label){runOnMainSync(()->{View v=text(a.getWindow().getDecorView(),label);if(v==null)throw new AssertionError("Missing UI: "+label);v.performClick();});waitForIdleSync();}
+    private void click(Activity a,String label){runOnMainSync(()->{View v=text(a.getWindow().getDecorView(),label);while(v!=null&&!v.isClickable())v=v.getParent() instanceof View?(View)v.getParent():null;if(v==null)throw new AssertionError("Missing clickable UI: "+label);v.performClick();});waitForIdleSync();}
     private void setupUiTests(){
         Activity main=launch(MainActivity.class,null);waitForIdleSync();
         check(text(main.getWindow().getDecorView(),"初始化余额，开始记账")!=null,"initialization screen shown before ledger");
@@ -87,6 +118,8 @@ public final class LedgerInstrumentation extends Instrumentation {
     }
     private void uiTests(){
         Activity add=launch(EntryActivity.class,null);waitForIdleSync();
+        check(text(add.getWindow().getDecorView(),"居家")==null&&text(add.getWindow().getDecorView(),Ledger.MONTHLY)!=null,"home removed and subscription option present");
+        click(add,"购物");for(String c:new String[]{"日用品","赛车模拟器","钓鱼","电动车","摩托车"})check(text(add.getWindow().getDecorView(),c)!=null,"shopping option "+c);click(add,"餐饮");
         runOnMainSync(()->{TextView label=(TextView)text(add.getWindow().getDecorView(),"餐饮");check((label.getGravity()&Gravity.HORIZONTAL_GRAVITY_MASK)==Gravity.CENTER_HORIZONTAL,"category text centered");TextView option=(TextView)text(add.getWindow().getDecorView(),"电动车充电");check(option==null,"travel options hidden for dining");check(text(add.getWindow().getDecorView(),"饮用水")!=null,"five dining options present");});
         runOnMainSync(()->((EditText)add.findViewById(101)).setText("0"));click(add,"保存记录");
         try(LedgerDb db=new LedgerDb(getTargetContext())){check(db.count()==0,"invalid form not saved");}
@@ -98,5 +131,10 @@ public final class LedgerInstrumentation extends Instrumentation {
         Activity tagged=launch(EntryActivity.class,id);waitForIdleSync();runOnMainSync(()->check(text(tagged.getWindow().getDecorView(),"早餐").isSelected(),"subcategory preselected when editing"));runOnMainSync(()->tagged.finish());waitForIdleSync();
         Activity main=launch(MainActivity.class,null);waitForIdleSync();click(main,"统计");check(text(main.getWindow().getDecorView(),"钱都花在哪儿")!=null,"stats screen");click(main,"我的");check(text(main.getWindow().getDecorView(),"导出备份")!=null,"backup screen");click(main,"明细");check(text(main.getWindow().getDecorView(),"餐饮")!=null,"ledger entry visible");
         runOnMainSync(()->main.finish());waitForIdleSync();
+    }
+    private void subscriptionUiTests(){
+        Activity form=launch(SubscriptionActivity.class,null);waitForIdleSync();
+        runOnMainSync(()->{((EditText)form.findViewById(201)).setText("UI会员");((EditText)form.findViewById(202)).setText("30.00");});click(form,"保存自动订阅");
+        try(LedgerDb db=new LedgerDb(getTargetContext())){check(db.subscriptions(false).size()==1,"UI creates recurring plan");check(db.currentBalance()==-5550,"today billing day updates balance immediately");check(Ledger.filter(db.list(YearMonth.now().toString()),1,"","","",2).size()==1,"automatic charges separately filterable");}
     }
 }

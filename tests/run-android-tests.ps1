@@ -11,7 +11,7 @@ for($attempt=0;$attempt -lt 120;$attempt++) {
 }
 if(-not $ready){throw 'Emulator did not finish booting within 10 minutes'}
 Write-Output 'Installing delivery APK and instrumentation APK...'
-& $adb -s $serial install -r 'deliverables\JianJi-1.2.0.apk'
+& $adb -s $serial install -r 'deliverables\JianJi-1.3.0.apk'
 if($LASTEXITCODE -ne 0){throw 'App installation failed'}
 & $adb -s $serial install -r 'build\android-tests\tests.apk'
 if($LASTEXITCODE -ne 0){throw 'Test installation failed'}

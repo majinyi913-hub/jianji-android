@@ -18,8 +18,9 @@ function Run-Checked([string]$exe, [string[]]$arguments) {
     if ($LASTEXITCODE -ne 0) { throw "Command failed: $exe ($LASTEXITCODE)" }
 }
 New-Item -ItemType Directory -Force 'build\tests','build\classes','build\generated','build\dex','deliverables' | Out-Null
-Run-Checked $javac @('--release','8','-encoding','UTF-8','-d','build\tests','app\src\main\java\cn\jianji\app\Ledger.java','tests\LedgerTest.java')
+Run-Checked $javac @('--release','8','-encoding','UTF-8','-d','build\tests','app\src\main\java\cn\jianji\app\Ledger.java','app\src\main\java\cn\jianji\app\Subscription.java','tests\LedgerTest.java','tests\SubscriptionTest.java')
 Run-Checked $java @('-cp','build\tests','cn.jianji.app.LedgerTest')
+Run-Checked $java @('-cp','build\tests','cn.jianji.app.SubscriptionTest')
 if ($TestOnly) { exit 0 }
 Run-Checked "$buildTools\aapt2.exe" @('compile','--dir','app\src\main\res','-o','build\resources.zip')
 Run-Checked "$buildTools\aapt2.exe" @('link','-o','build\resources.apk','-I',$androidJar,'--manifest','app\src\main\AndroidManifest.xml','--java','build\generated','--min-sdk-version','26','--target-sdk-version','35','build\resources.zip')

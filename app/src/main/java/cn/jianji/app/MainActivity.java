@@ -25,6 +25,7 @@ public class MainActivity extends Activity {
     private LinearLayout root, body, records;
     private YearMonth month = YearMonth.now();
     private int tab = 0, filter = 0;
+    private int recordSource=0,statsSource=0;
     private boolean statsIncome = false;
     private String query = "";
     private String initialBalanceInput="";
@@ -33,6 +34,10 @@ public class MainActivity extends Activity {
     private int visibleLimit = 100;
     private List<Ledger.Entry> entries = new ArrayList<>();
     private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private boolean observingSubscriptions;
+    private final android.content.BroadcastReceiver subscriptionChanges=new android.content.BroadcastReceiver(){
+        @Override public void onReceive(android.content.Context c,Intent i){if(!isFinishing()&&!isDestroyed())render();}
+    };
     private static final int BACKUP = 301, CSV = 302, RESTORE = 303;
 
     @Override public void onCreate(Bundle state) {
@@ -40,13 +45,17 @@ public class MainActivity extends Activity {
         if (state != null) { month = YearMonth.parse(state.getString("month",month.toString())); tab = state.getInt("tab"); filter = state.getInt("filter"); query = state.getString("query",""); statsIncome = state.getBoolean("statsIncome"); }
         if(state!=null){recordCategory=state.getString("recordCategory","");recordDetail=state.getString("recordDetail","");statsCategory=state.getString("statsCategory","");statsDetail=state.getString("statsDetail","");}
         if(state!=null)initialBalanceInput=state.getString("initialBalanceInput","");
+        if(state!=null){recordSource=state.getInt("recordSource");statsSource=state.getInt("statsSource");recordCategory=Ledger.normalizeCategory(recordCategory);statsCategory=Ledger.normalizeCategory(statsCategory);}
         render();
     }
     @Override protected void onResume() { super.onResume(); if (db != null) render(); }
-    @Override protected void onSaveInstanceState(Bundle s) { super.onSaveInstanceState(s); s.putString("month",month.toString()); s.putInt("tab",tab); s.putInt("filter",filter); s.putString("query",query); s.putBoolean("statsIncome",statsIncome);s.putString("recordCategory",recordCategory);s.putString("recordDetail",recordDetail);s.putString("statsCategory",statsCategory);s.putString("statsDetail",statsDetail);s.putString("initialBalanceInput",initialBalanceInput); }
+    @Override protected void onStart(){super.onStart();android.content.IntentFilter changes=new android.content.IntentFilter(SubscriptionScheduler.CHANGED);changes.addAction(Intent.ACTION_DATE_CHANGED);if(android.os.Build.VERSION.SDK_INT>=33)registerReceiver(subscriptionChanges,changes,android.content.Context.RECEIVER_NOT_EXPORTED);else registerReceiver(subscriptionChanges,changes);observingSubscriptions=true;}
+    @Override protected void onStop(){if(observingSubscriptions){unregisterReceiver(subscriptionChanges);observingSubscriptions=false;}super.onStop();}
+    @Override protected void onSaveInstanceState(Bundle s) { super.onSaveInstanceState(s); s.putString("month",month.toString()); s.putInt("tab",tab); s.putInt("filter",filter); s.putString("query",query); s.putBoolean("statsIncome",statsIncome);s.putString("recordCategory",recordCategory);s.putString("recordDetail",recordDetail);s.putString("statsCategory",statsCategory);s.putString("statsDetail",statsDetail);s.putString("initialBalanceInput",initialBalanceInput);s.putInt("recordSource",recordSource);s.putInt("statsSource",statsSource); }
     @Override protected void onDestroy() { io.shutdown(); if(db != null) db.close(); super.onDestroy(); }
 
     private void render() {
+        db.applyDueSubscriptions(LocalDate.now(),1000);SubscriptionScheduler.schedule(this,db);
         entries = db.list(month.toString());
         root = Ui.col(this); root.setBackgroundColor(Ui.BG); setContentView(root); Ui.applyInsets(this,root);
         LinearLayout header = Ui.row(this); Ui.pad(header,22,16,22,12);
@@ -55,11 +64,11 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setClipToPadding(false);
         body = Ui.col(this); Ui.pad(body,20,4,20,20); scroll.addView(body); root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
         if(!db.hasBalance()){balanceSetup();return;}
-        if (tab == 0) ledgerPage(); else if (tab == 1) statsPage(); else settingsPage();
+        if (tab == 0) ledgerPage(); else if (tab == 1) statsPage(); else if(tab==3)subscriptionsPage();else settingsPage();
         LinearLayout footer = Ui.col(this); footer.setBackgroundColor(Ui.WHITE); Ui.pad(footer,20,10,20,2);
         Button add = Ui.button(this,"＋  记一笔",true); add.setContentDescription("新增收支记录"); add.setOnClickListener(v -> openEditor(null)); footer.addView(add,new LinearLayout.LayoutParams(-1,Ui.dp(this,52)));
-        LinearLayout nav = Ui.row(this); String[] names = {"明细", "统计", "我的"};
-        for (int i = 0; i < names.length; i++) { final int n = i; TextView t = Ui.text(this,names[i],14,tab == i ? Ui.GREEN : Ui.MUTED,tab == i); t.setGravity(Gravity.CENTER); t.setMinHeight(Ui.dp(this,52)); t.setContentDescription(names[i]+(tab==i ? "，已选中" : "")); t.setBackground(Ui.bg(Ui.WHITE,10,this)); t.setOnClickListener(v -> { tab=n; render(); }); nav.addView(t,new LinearLayout.LayoutParams(0,Ui.dp(this,52),1)); }
+        LinearLayout nav = Ui.row(this); String[] names = {"明细", "统计", "自动订阅", "我的"};int[] pages={0,1,3,2};
+        for (int i = 0; i < names.length; i++) { final int n = pages[i]; TextView t = Ui.text(this,names[i],14,tab == n ? Ui.GREEN : Ui.MUTED,tab == n); t.setGravity(Gravity.CENTER); t.setMinHeight(Ui.dp(this,52)); t.setContentDescription(names[i]+(tab==n ? "，已选中" : "")); t.setBackground(Ui.bg(Ui.WHITE,10,this)); t.setOnClickListener(v -> { tab=n; render(); }); nav.addView(t,new LinearLayout.LayoutParams(0,Ui.dp(this,52),1)); }
         footer.addView(nav); root.addView(footer);
     }
 
@@ -101,7 +110,7 @@ public class MainActivity extends Activity {
         }));dialog.show();
     }
     private void restoreDialog() {
-        String explanation=db.hasBalance()?"将合并账目和预算，重复记录跳过。保留本机余额起点，新增收支会计入目前存款。":"将恢复账目和预算；新版备份也会恢复余额。旧版备份没有余额，导入后仍需填写目前余额。";
+        String explanation=db.hasBalance()?"将合并账目、预算和订阅，重复记录跳过。保留本机已有订阅及余额起点；新增收支和到期订阅会计入存款。":"将恢复账目、预算及订阅；新版备份会恢复余额。旧版备份没有余额时，导入后仍需填写目前余额。";
         new AlertDialog.Builder(this).setTitle("恢复简记备份").setMessage(explanation).setNegativeButton("取消",null).setPositiveButton("选择文件",(d,w)->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("*/*");startPicker(i,RESTORE);}).show();
     }
 
@@ -132,8 +141,8 @@ public class MainActivity extends Activity {
         LinearLayout heading=Ui.row(this); Ui.weight(heading,Ui.text(this,"收支明细",20,Ui.INK,true)); heading.addView(Ui.text(this,entries.size()+" 笔",13,Ui.MUTED,false)); body.addView(heading); Ui.space(body,12);
         EditText search = Ui.input(this,"搜索分类、细分或备注"); search.setTextSize(14); search.setText(query); search.setContentDescription("搜索本月记录"); body.addView(search); Ui.space(body,10);
         LinearLayout filters=Ui.row(this); String[] names={"全部","支出","收入"};
-        for(int i=0;i<3;i++) { final int n=i; Button f=Ui.button(this,names[i],filter==i); f.setTextSize(13); LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Ui.dp(this,44),1); if(i>0)p.leftMargin=Ui.dp(this,8); filters.addView(f,p); f.setOnClickListener(v->{filter=n;recordCategory="";recordDetail="";visibleLimit=100;render();}); }
-        body.addView(filters); Ui.space(body,10); categoryFilters(false); Ui.space(body,10);
+        for(int i=0;i<3;i++) { final int n=i; Button f=Ui.button(this,names[i],filter==i); f.setTextSize(13); LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Ui.dp(this,44),1); if(i>0)p.leftMargin=Ui.dp(this,8); filters.addView(f,p); f.setOnClickListener(v->{filter=n;recordCategory="";recordDetail="";if(n==2)recordSource=0;visibleLimit=100;render();}); }
+        body.addView(filters); Ui.space(body,10); categoryFilters(false); Ui.space(body,10);sourceFilters(false);
         recordSummary=Ui.text(this,"",12,Ui.MUTED,false);recordSummary.setLineSpacing(Ui.dp(this,4),1);body.addView(recordSummary);
         Ui.space(body,8);records=Ui.col(this); body.addView(records); renderRecords();
         search.addTextChangedListener(new TextWatcher(){ public void beforeTextChanged(CharSequence s,int a,int c,int f){} public void onTextChanged(CharSequence s,int st,int before,int count){query=s.toString();visibleLimit=100;renderRecords();} public void afterTextChanged(Editable e){} });
@@ -143,10 +152,10 @@ public class MainActivity extends Activity {
     }
     private void renderRecords() {
         records.removeAllViews(); String last=""; int count=0; boolean more=false;
-        List<Ledger.Entry> filtered=Ledger.filter(entries,filter,recordCategory,recordDetail,query);
+        List<Ledger.Entry> filtered=Ledger.filter(entries,filter,recordCategory,recordDetail,query,recordSource);
         long[] selectedTotal=Ledger.totals(filtered);
         recordSummary.setText("筛选结果 "+filtered.size()+" 笔  ·  收入 ¥ "+Ledger.money(selectedTotal[0])+"  ·  支出 ¥ "+Ledger.money(selectedTotal[1]));
-        boolean narrowed=filter!=0||!recordCategory.isEmpty()||!recordDetail.isEmpty()||!query.trim().isEmpty();
+        boolean narrowed=filter!=0||!recordCategory.isEmpty()||!recordDetail.isEmpty()||!query.trim().isEmpty()||recordSource>0;
         for(Ledger.Entry e:filtered) {
             if(count>=visibleLimit){more=true;break;}
             if(!last.equals(e.date)) { if(count>0)Ui.space(records,12); LinearLayout dh=Ui.row(this); TextView date=Ui.text(this,dateLabel(e.date),12,Ui.MUTED,true); Ui.pad(date,2,10,0,10); Ui.weight(dh,date);
@@ -184,6 +193,7 @@ public class MainActivity extends Activity {
     }
     private void chooseCategory(boolean statistics) {
         int kind=statistics?(statsIncome?2:1):filter;
+        if((statistics?statsSource:recordSource)>0)kind=1;
         List<String> choices=new ArrayList<>();choices.add("全部分类");
         if(kind!=2)Collections.addAll(choices,Ledger.EXPENSE);
         if(kind!=1)Collections.addAll(choices,Ledger.INCOME);
@@ -211,10 +221,10 @@ public class MainActivity extends Activity {
         LinearLayout tabs=Ui.row(this);Button exp=Ui.button(this,"支出分类",!statsIncome),inc=Ui.button(this,"收入分类",statsIncome);Ui.weight(tabs,exp);
         LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Ui.dp(this,50),1);p.leftMargin=Ui.dp(this,10);tabs.addView(inc,p);
         exp.setOnClickListener(v->{statsIncome=false;statsCategory="";statsDetail="";render();});
-        inc.setOnClickListener(v->{statsIncome=true;statsCategory="";statsDetail="";render();});body.addView(tabs);Ui.space(body,12);categoryFilters(true);Ui.space(body,16);
-        List<Ledger.Entry> selected=Ledger.filter(entries,statsIncome?2:1,statsCategory,statsDetail,"");
+        inc.setOnClickListener(v->{statsIncome=true;statsCategory="";statsDetail="";statsSource=0;render();});body.addView(tabs);Ui.space(body,12);categoryFilters(true);Ui.space(body,12);sourceFilters(true);Ui.space(body,4);
+        List<Ledger.Entry> selected=Ledger.filter(entries,statsIncome?2:1,statsCategory,statsDetail,"",statsSource);
         long sum=Ledger.totals(selected)[statsIncome?0:1],grand=Ledger.totals(entries)[statsIncome?0:1];
-        String scope=statsCategory.isEmpty()?"全部分类":statsCategory+(statsDetail.isEmpty()?"":" · "+statsDetail);
+        String scope=(statsCategory.isEmpty()?"全部分类":statsCategory+(statsDetail.isEmpty()?"":" · "+statsDetail))+(statsSource==1?" · 订阅扣费":statsSource==2?" · 自动订阅":"");
         LinearLayout summary=Ui.card(this);summary.addView(Ui.text(this,(statsIncome?"本月收入":"本月支出")+" · "+scope,13,Ui.MUTED,false));Ui.space(summary,12);
         TextView amount=Ui.text(this,"¥ "+Ledger.money(sum),32,Ui.GREEN,true);amount.setMaxLines(1);amount.setAutoSizeTextTypeUniformWithConfiguration(16,32,1,android.util.TypedValue.COMPLEX_UNIT_SP);summary.addView(amount,new LinearLayout.LayoutParams(-1,Ui.dp(this,44)));Ui.space(summary,12);
         summary.addView(Ui.text(this,"共 "+selected.size()+" 笔  ·  日均 ¥ "+Ledger.money(sum/elapsedDays()),13,Ui.MUTED,false));Ui.space(summary,8);
@@ -232,7 +242,30 @@ public class MainActivity extends Activity {
             list.addView(r);list.addView(progress(c.getValue(),sum));Ui.space(list,5);list.addView(Ui.text(this,String.format(Locale.CHINA,"占比 %.1f%%",c.getValue()*100.0/sum),12,Ui.MUTED,false));
         }
         body.addView(list);Ui.space(body,16);Button detail=Ui.button(this,"查看这 "+selected.size()+" 笔明细  ›",false);
-        detail.setOnClickListener(v->{tab=0;filter=statsIncome?2:1;recordCategory=statsCategory;recordDetail=statsDetail;query="";visibleLimit=100;render();});body.addView(detail,new LinearLayout.LayoutParams(-1,Ui.dp(this,52)));
+        detail.setOnClickListener(v->{tab=0;filter=statsIncome?2:1;recordCategory=statsCategory;recordDetail=statsDetail;recordSource=statsSource;query="";visibleLimit=100;render();});body.addView(detail,new LinearLayout.LayoutParams(-1,Ui.dp(this,52)));
+    }
+    private void sourceFilters(boolean statistics){
+        if(statistics?statsIncome:filter==2)return;
+        body.addView(Ui.text(this,"记账来源",12,Ui.MUTED,false));Ui.space(body,7);LinearLayout row=Ui.row(this);String[] labels={"全部来源","订阅扣费","自动订阅"};int selected=statistics?statsSource:recordSource;
+        for(int i=0;i<labels.length;i++){final int mode=i;Button b=Ui.button(this,labels[i],selected==i);b.setTextSize(12);b.setContentDescription((statistics?"统计":"明细")+"来源筛选："+labels[i]);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Ui.dp(this,44),1);if(i>0)p.leftMargin=Ui.dp(this,7);row.addView(b,p);b.setOnClickListener(v->{if(statistics)statsSource=mode;else{recordSource=mode;visibleLimit=100;}render();});}body.addView(row);Ui.space(body,12);
+    }
+    private void openSubscription(String id){Intent i=new Intent(this,SubscriptionActivity.class);if(id!=null)i.putExtra("id",id);startActivityForResult(i,101);}
+    private void subscriptionsPage(){
+        Ui.space(body,8);body.addView(Ui.text(this,"自动订阅",25,Ui.INK,true));Ui.space(body,8);
+        TextView intro=Ui.text(this,"到期自动生成本机支出记录，并更新目前存款。",13,Ui.MUTED,false);intro.setLineSpacing(Ui.dp(this,5),1);body.addView(intro);Ui.space(body,20);
+        List<Subscription> plans=db.subscriptions(false);long total=0;for(Subscription s:plans)total+=s.cents;
+        LinearLayout summary=Ui.card(this);summary.addView(Ui.text(this,"计划每月支出 · "+plans.size()+" 个订阅",13,Ui.MUTED,false));Ui.space(summary,10);summary.addView(Ui.text(this,"¥ "+Ledger.money(total),30,Ui.GREEN,true));body.addView(summary);Ui.space(body,14);
+        Button add=Ui.button(this,"＋ 新增自动订阅",true);add.setOnClickListener(v->openSubscription(null));body.addView(add,new LinearLayout.LayoutParams(-1,Ui.dp(this,52)));Ui.space(body,10);
+        Button stats=Ui.button(this,"查看本月自动订阅扣费",false);stats.setOnClickListener(v->{tab=1;statsIncome=false;statsCategory="";statsDetail="";statsSource=2;render();});body.addView(stats,new LinearLayout.LayoutParams(-1,Ui.dp(this,50)));Ui.space(body,18);
+        if(plans.isEmpty()){empty(body,"还没有自动订阅","可从上方新增，或在支出分类的“每月订阅服务”中设置。");return;}
+        for(Subscription s:plans){
+            LinearLayout card=Ui.card(this);LinearLayout title=Ui.row(this);TextView name=Ui.text(this,s.name,17,Ui.INK,true);name.setMaxLines(2);Ui.weight(title,name);title.addView(Ui.text(this,"¥ "+Ledger.money(s.cents),16,Ui.GREEN,true));card.addView(title);Ui.space(card,12);
+            card.addView(Ui.text(this,s.category+" · 每月 "+s.billingDay+" 日",13,Ui.MUTED,false));Ui.space(card,8);card.addView(Ui.text(this,s.nextDate()==null?"已完成全部扣费月份":"下一次记账："+s.nextDate(),13,Ui.MUTED,false));Ui.space(card,14);
+            LinearLayout actions=Ui.row(this);Button edit=Ui.button(this,"编辑",false);edit.setOnClickListener(v->openSubscription(s.id));Ui.weight(actions,edit);
+            Button delete=Ui.button(this,"删除",false);delete.setTextColor(Ui.RED);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,Ui.dp(this,50),1);p.leftMargin=Ui.dp(this,8);actions.addView(delete,p);
+            delete.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("删除“"+s.name+"”？").setMessage("停止后续自动记账，已发生的支出和存款变动保留。").setNegativeButton("保留",null).setPositiveButton("删除",(d,w)->{db.deleteSubscription(s.id);render();}).show());card.addView(actions);body.addView(card);Ui.space(body,12);
+        }
+        TextView timing=Ui.text(this,"系统后台可能延迟，打开 App 会补记到期费用。每月只记一次；删除历史扣费后也不会自动重新生成。",12,Ui.MUTED,false);timing.setLineSpacing(Ui.dp(this,5),1);body.addView(timing);
     }
     private int elapsedDays(){YearMonth now=YearMonth.now();return month.equals(now)?LocalDate.now().getDayOfMonth():month.isAfter(now)?1:month.lengthOfMonth();}
     private void settingsPage(){
@@ -240,10 +273,10 @@ public class MainActivity extends Activity {
         balanceCard();
         LinearLayout card=Ui.card(this);card.addView(Ui.text(this,"账本概览",16,Ui.INK,true));Ui.space(card,16);card.addView(Ui.text(this,db.count()+" 笔记录",30,Ui.GREEN,true));Ui.space(card,8);card.addView(Ui.text(this,"货币：人民币（CNY）",13,Ui.MUTED,false));body.addView(card);Ui.space(body,22);
         body.addView(Ui.text(this,"数据管理",18,Ui.INK,true));Ui.space(body,12);
-        action("导出备份","全部记录、预算及余额 · JSON，可恢复",()->createDocument(BACKUP,"application/json","简记备份-"+LocalDate.now()+".json"));
+        action("导出备份","账目、预算、余额及订阅 · JSON，可恢复",()->createDocument(BACKUP,"application/json","简记备份-"+LocalDate.now()+".json"));
         action("恢复备份","合并导入，重复记录自动跳过",()->restoreDialog());
         action("导出表格","全部记录 · CSV，可用 Excel 打开",()->createDocument(CSV,"text/csv","简记账单-"+LocalDate.now()+".csv"));
-        Ui.space(body,16);LinearLayout note=Ui.card(this);note.setBackground(Ui.bg(Ui.PALE,20,this));note.addView(Ui.text(this,"数据保存在这台手机上",15,Ui.GREEN,true));Ui.space(note,8);note.addView(Ui.text(this,"建议定期导出备份。卸载应用或清除应用数据会删除本机账本；更换手机时，可通过 JSON 备份恢复。",13,Ui.GREEN,false));body.addView(note);Ui.space(body,24);TextView ver=Ui.text(this,"简记 1.2.0  /  认真生活，轻松记录",12,Ui.MUTED,false);ver.setGravity(Gravity.CENTER);body.addView(ver);
+        Ui.space(body,16);LinearLayout note=Ui.card(this);note.setBackground(Ui.bg(Ui.PALE,20,this));note.addView(Ui.text(this,"数据保存在这台手机上",15,Ui.GREEN,true));Ui.space(note,8);note.addView(Ui.text(this,"建议定期导出备份。卸载应用或清除应用数据会删除本机账本；更换手机时，可通过 JSON 备份恢复。",13,Ui.GREEN,false));body.addView(note);Ui.space(body,24);TextView ver=Ui.text(this,"简记 1.3.0  /  认真生活，轻松记录",12,Ui.MUTED,false);ver.setGravity(Gravity.CENTER);body.addView(ver);
     }
     private void action(String title,String subtitle,Runnable fn){LinearLayout c=Ui.card(this);Ui.pad(c,18,16,18,16);LinearLayout r=Ui.row(this);LinearLayout texts=Ui.col(this);texts.addView(Ui.text(this,title,16,Ui.INK,true));Ui.space(texts,7);texts.addView(Ui.text(this,subtitle,12,Ui.MUTED,false));Ui.weight(r,texts);r.addView(Ui.text(this,"›",24,Ui.MUTED,false));c.addView(r);c.setOnClickListener(v->fn.run());body.addView(c);Ui.space(body,10);}
     private void empty(LinearLayout parent,String title,String sub){LinearLayout c=Ui.col(this);Ui.pad(c,14,32,14,30);TextView icon=Ui.text(this,"记",26,Ui.GREEN,true);icon.setGravity(Gravity.CENTER);icon.setBackground(Ui.bg(Ui.PALE,22,this));LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(Ui.dp(this,68),Ui.dp(this,68));ip.gravity=Gravity.CENTER_HORIZONTAL;c.addView(icon,ip);Ui.space(c,18);TextView h=Ui.text(this,title,16,Ui.INK,true);h.setGravity(Gravity.CENTER);c.addView(h);Ui.space(c,10);TextView t=Ui.text(this,sub,12,Ui.MUTED,false);t.setGravity(Gravity.CENTER);t.setLineSpacing(Ui.dp(this,5),1);c.addView(t);parent.addView(c);}
@@ -251,11 +284,11 @@ public class MainActivity extends Activity {
     private void openEditor(String id){Intent i=new Intent(this,EntryActivity.class);if(id!=null)i.putExtra("id",id);startActivityForResult(i,100);}
     private void createDocument(int request,String mime,String name){Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType(mime);i.putExtra(Intent.EXTRA_TITLE,name);startPicker(i,request);}
     private void startPicker(Intent i,int request){try{startActivityForResult(i,request);}catch(android.content.ActivityNotFoundException e){message("无法打开文件选择器","请在手机上启用系统“文件”应用后重试。");}}
-    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null)return;if(request==100){String savedMonth=data.getStringExtra("month");if(Ledger.validMonth(savedMonth)){month=YearMonth.parse(savedMonth);query="";filter=0;recordCategory="";recordDetail="";visibleLimit=100;}return;}if(data.getData()==null)return;final android.net.Uri uri=data.getData();if(request!=BACKUP&&request!=CSV&&request!=RESTORE)return;Toast.makeText(this,"正在处理…",Toast.LENGTH_SHORT).show();
+    @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==101&&result==RESULT_OK){tab=3;return;}if(result!=RESULT_OK||data==null)return;if(request==100){String savedMonth=data.getStringExtra("month");if(Ledger.validMonth(savedMonth)){month=YearMonth.parse(savedMonth);query="";filter=0;recordCategory="";recordDetail="";recordSource=0;visibleLimit=100;}if(data.getBooleanExtra("subscriptionSaved",false))tab=3;return;}if(data.getData()==null)return;final android.net.Uri uri=data.getData();if(request!=BACKUP&&request!=CSV&&request!=RESTORE)return;Toast.makeText(this,"正在处理…",Toast.LENGTH_SHORT).show();
         io.execute(()->{try(LedgerDb worker=new LedgerDb(getApplicationContext())){
             String done;
             if(request==RESTORE){try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("无法读取文件");ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int len;while((len=in.read(buffer))!=-1){bytes.write(buffer,0,len);if(bytes.size()>64*1024*1024)throw new IOException("备份文件超过 64 MB");}boolean hadBalance=worker.hasBalance();int[] count=worker.restore(bytes.toString("UTF-8"));done="新增 "+count[0]+" 笔记录，跳过 "+count[1]+" 笔重复记录。已有预算保持原值。\n"+(hadBalance?"已保留本机余额起点，新增收支已计入存款。":worker.hasBalance()?"已恢复备份中的余额。":"此备份没有余额，请输入目前实际余额完成初始化。");}}
-            else {String content=request==BACKUP?worker.backup():Ledger.csv(worker.list(null));try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException("无法写入文件");out.write(content.getBytes(StandardCharsets.UTF_8));}done=request==BACKUP?"备份已保存，包含全部记录、预算和余额。":"CSV 已保存，可用 Excel 等表格应用打开。";}
+            else {String content=request==BACKUP?worker.backup():Ledger.csv(worker.list(null));try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException("无法写入文件");out.write(content.getBytes(StandardCharsets.UTF_8));}done=request==BACKUP?"备份已保存，包含全部记录、预算、余额和订阅进度。":"CSV 已保存，可用 Excel 等表格应用打开。";}
             final String text=done;runOnUiThread(()->{if(!isFinishing()&&!isDestroyed()){render();message("处理完成",text);}});
         }catch(Exception e){runOnUiThread(()->{if(!isFinishing()&&!isDestroyed())message("处理失败",request==RESTORE?"文件无法读取或内容不符合简记备份格式。本机数据未更改。\n"+safeError(e):"未能完整保存，请重新导出。\n"+safeError(e));});}});
     }

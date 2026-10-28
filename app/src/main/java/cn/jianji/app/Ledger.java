@@ -18,10 +18,12 @@ public final class Ledger {
     public static final long MAX_CENTS = 9_999_999_999L;
     public static final long MAX_BALANCE_CENTS = 99_999_999_999_999L;
     public static final long MAX_BALANCE_BASE = 9_000_000_000_000_000L;
-    public static final String[] EXPENSE = {"餐饮", "交通", "购物", "居家", "娱乐", "医疗", "学习", "其他支出"};
+    public static final String[] EXPENSE = {"餐饮", "交通", "购物", "娱乐", "医疗", "学习", "其他支出"};
     public static final String[] INCOME = {"工资", "奖金", "兼职", "理财", "红包", "其他收入"};
     public static final String[] DINING = {"早餐", "午餐", "晚餐", "饮用水", "额外支出"};
     public static final String[] TRAVEL = {"电动车充电", "地铁", "高铁", "公交", "网约车", "出租车", "共享单车", "加油", "停车", "飞机", "普铁", "其他出行"};
+    public static final String[] SHOPPING = {"日用品", "赛车模拟器", "钓鱼", "电动车", "摩托车", "数码产品", "服饰鞋包", "其他购物"};
+    public static final String MONTHLY = "每月订阅服务";
     public static final String UNSPECIFIED = "未细分";
 
     public static class Entry {
@@ -30,10 +32,13 @@ public final class Ledger {
         public long cents;
         public String category = EXPENSE[0];
         public String subcategory = "";
+        public String subscriptionId = "", subscriptionMonth = "";
         public String date = LocalDate.now().toString();
         public String note = "";
         public long createdAt = System.currentTimeMillis();
         public boolean income() { return "income".equals(type); }
+        public boolean automated() { return !subscriptionId.isEmpty(); }
+        public boolean subscription() { return MONTHLY.equals(subcategory) || automated(); }
     }
 
     public static long parseAmount(String text) {
@@ -91,6 +96,11 @@ public final class Ledger {
         } catch (DateTimeParseException ex) { throw new IllegalArgumentException("日期无效"); }
         if (e.note == null || e.note.length() > 200) throw new IllegalArgumentException("备注最多 200 字");
         if (e.createdAt < 0) throw new IllegalArgumentException("创建时间无效");
+        if(e.subscriptionId==null||e.subscriptionMonth==null)throw new IllegalArgumentException("订阅来源无效");
+        if(e.automated()){
+            if(e.income()||!MONTHLY.equals(e.subcategory)||!e.subscriptionId.matches("[A-Za-z0-9-]{1,64}")||!validMonth(e.subscriptionMonth))throw new IllegalArgumentException("自动订阅扣费记录无效");
+            if(!Subscription.entryId(e.subscriptionId,YearMonth.parse(e.subscriptionMonth)).equals(e.id))throw new IllegalArgumentException("订阅扣费标识无效");
+        }else if(!e.subscriptionMonth.isEmpty())throw new IllegalArgumentException("订阅扣费月份无效");
     }
 
     public static long[] totals(List<Entry> entries) {
@@ -107,10 +117,13 @@ public final class Ledger {
     }
 
     public static String[] subcategories(String category) {
-        if ("餐饮".equals(category)) return DINING.clone();
-        if ("交通".equals(category)) return TRAVEL.clone();
-        return new String[0];
+        String[] base="餐饮".equals(category)?DINING:"交通".equals(category)?TRAVEL:"购物".equals(category)?SHOPPING:new String[0];
+        for(String expense:EXPENSE)if(expense.equals(category)){
+            String[] result=java.util.Arrays.copyOf(base,base.length+1);result[base.length]=MONTHLY;return result;
+        }
+        return base.clone();
     }
+    public static String normalizeCategory(String category){return "居家".equals(category)?"其他支出":category;}
 
     public static String categoryLabel(Entry e) {
         return e.category + (e.subcategory.isEmpty() ? "" : " · " + e.subcategory);
@@ -118,9 +131,13 @@ public final class Ledger {
 
     /** Empty category/detail selects all; UNSPECIFIED selects legacy/unclassified details. */
     public static List<Entry> filter(List<Entry> entries, int type, String category, String detail, String search) {
+        return filter(entries,type,category,detail,search,0);
+    }
+    public static List<Entry> filter(List<Entry> entries, int type, String category, String detail, String search,int subscriptionMode) {
         List<Entry> result = new ArrayList<>();
         String needle = search.trim().toLowerCase(Locale.ROOT);
         for (Entry e : entries) {
+            if(subscriptionMode==1&&!e.subscription()||subscriptionMode==2&&!e.automated())continue;
             if ((type == 1 && e.income()) || (type == 2 && !e.income())) continue;
             if (!category.isEmpty() && !category.equals(e.category)) continue;
             if (!detail.isEmpty() && !(UNSPECIFIED.equals(detail) ? e.subcategory.isEmpty() : detail.equals(e.subcategory))) continue;
@@ -145,9 +162,10 @@ public final class Ledger {
     }
 
     public static String csv(List<Entry> entries) {
-        StringBuilder out = new StringBuilder("\uFEFF日期,类型,分类,细分分类,金额（元）,备注\r\n");
+        StringBuilder out = new StringBuilder("\uFEFF日期,类型,分类,细分分类,金额（元）,备注,记账来源,订阅扣费月份\r\n");
         for (Entry e : entries) out.append(cell(e.date)).append(',').append(e.income() ? "收入" : "支出").append(',')
-            .append(cell(e.category)).append(',').append(cell(e.subcategory)).append(',').append(decimal(e.cents)).append(',').append(cell(e.note)).append("\r\n");
+            .append(cell(e.category)).append(',').append(cell(e.subcategory)).append(',').append(decimal(e.cents)).append(',').append(cell(e.note)).append(',')
+            .append(e.automated()?"自动订阅":e.subscription()?"手动订阅":"普通记账").append(',').append(cell(e.subscriptionMonth)).append("\r\n");
         return out.toString();
     }
 

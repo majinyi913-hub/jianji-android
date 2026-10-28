@@ -23,7 +23,7 @@ public final class LedgerTest {
         a.cents=Ledger.MAX_CENTS;equal(19999999998L,Ledger.totals(Arrays.asList(a,a))[1]);
         for(String child:Ledger.DINING){Ledger.Entry tagged=entry("餐饮",child,100);Ledger.validate(tagged);checks++;}
         for(String child:Ledger.TRAVEL){Ledger.Entry tagged=entry("交通",child,100);Ledger.validate(tagged);checks++;}
-        equal(5,Ledger.subcategories("餐饮").length);equal(12,Ledger.subcategories("交通").length);equal(0,Ledger.subcategories("工资").length);
+        equal(6,Ledger.subcategories("餐饮").length);equal(13,Ledger.subcategories("交通").length);equal(0,Ledger.subcategories("工资").length);
         Ledger.Entry bad=entry("餐饮","地铁",100);reject(()->Ledger.validate(bad));bad.category="交通";bad.subcategory="早餐";reject(()->Ledger.validate(bad));
         bad.category="购物";bad.subcategory="饮用水";reject(()->Ledger.validate(bad));bad.type="income";bad.category="工资";reject(()->Ledger.validate(bad));
         bad.subcategory=null;reject(()->Ledger.validate(bad));bad.subcategory="";Ledger.validate(bad);checks++;
