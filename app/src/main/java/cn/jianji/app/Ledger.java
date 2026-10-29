@@ -18,7 +18,7 @@ public final class Ledger {
     public static final long MAX_CENTS = 9_999_999_999L;
     public static final long MAX_BALANCE_CENTS = 99_999_999_999_999L;
     public static final long MAX_BALANCE_BASE = 9_000_000_000_000_000L;
-    public static final String[] EXPENSE = {"餐饮", "交通", "购物", "娱乐", "医疗", "学习", "其他支出"};
+    public static final String[] EXPENSE = {"餐饮", "交通", "购物", "房租水电", "娱乐", "医疗", "学习", "其他支出"};
     public static final String[] INCOME = {"工资", "奖金", "兼职", "理财", "红包", "其他收入"};
     public static final String[] DINING = {"早餐", "午餐", "晚餐", "饮用水", "额外支出"};
     public static final String[] TRAVEL = {"电动车充电", "地铁", "高铁", "公交", "网约车", "出租车", "共享单车", "加油", "停车", "飞机", "普铁", "其他出行"};
